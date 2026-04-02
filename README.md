@@ -48,7 +48,7 @@ Descriptioner keeps vanilla enchant visuals while adding short lore lines under 
 
 Generated artifact:
 
-- `build/libs/Descriptioner-1.0.0.jar`
+- `build/libs/Descriptioner-1.0.1.jar`
 
 ## Configuration
 
