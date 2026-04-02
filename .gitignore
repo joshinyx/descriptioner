@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+
+# Local tools/downloads
+.tools/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log

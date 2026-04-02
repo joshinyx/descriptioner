@@ -1,0 +1,7 @@
+name: Descriptioner
+version: 1.0.0
+main: dev.joshiny.descriptioner.Descriptioner
+api-version: "1.21"
+description: Muestra descripciones de encantamientos en los tooltips de los items
+authors:
+  - joshiny

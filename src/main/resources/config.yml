@@ -1,0 +1,102 @@
+# Descriptioner configuration
+
+# Language file used for descriptions.
+# Must exist as: plugins/Descriptioner/languages/<locale>.yml
+language: es_ES
+
+# Used if the configured language file is missing.
+fallback-language: en_US
+
+# Inventory sync interval in ticks (20 ticks = 1 second).
+# 2 is fast and still lightweight for most servers.
+refresh-period-ticks: 2
+
+# Master switch.
+enchant-name-styling:
+  # false = keep vanilla enchant title colors.
+  # true  = apply only rules declared in `enchant-overrides`.
+  enabled: false
+
+  # true = always show level suffix.
+  # false = level follows vanilla behavior.
+  always-show-level: false
+
+  # Default colors used when a rule does not override them.
+  # Supports named colors (gray, red, dark_green...) and hex (#RRGGBB).
+  normal-name-color: gray
+  normal-level-color: gray
+  curse-name-color: red
+  curse-level-color: dark_red
+
+  roman-char-colors:
+    # When true, roman numerals are colored per character (I, V, X, ...).
+    # Example: "IX" can render I in one color and X in another.
+    enabled: false
+
+    # Character colors used only when "roman-char-colors" is enabled.
+    i: "#00AA00"
+    v: gold
+    x: aqua
+    l: yellow
+    c: blue
+    d: light_purple
+    m: red
+
+  # Per-enchant custom rules.
+  # Key can be namespaced ("minecraft:efficiency") or bare ("efficiency").
+  # Any enchant/level not declared here stays vanilla.
+  
+  # IMPORTANT:
+  # Do not use `enchant-overrides: {}` if you plan to add entries below.
+  # Keep it as a normal mapping block like this:
+  enchant-overrides:
+
+  # Example 1: one specific level
+  # enchant-overrides:
+  #   efficiency:
+  #     levels:
+  #       "50":
+  #         name-color: "#FF8800"
+  #         level-color: "#00FFFF"
+
+  # Example 2: segmented text with full control
+  # enchant-overrides:
+  #   efficiency:
+  #     use-translatable-name: false
+  #     literal-name: "Efficiency"
+  #     levels:
+  #       "6":
+  #         name-segments:
+  #           - text: "Effi"
+  #             color: "#FFD700"
+  #           - text: "cie"
+  #             color: "#55AAFF"
+  #           - text: "ncy"
+  #             color: "#000000"
+  #         level-segments:
+  #           - text: " {level_roman}"
+  #             color: dark_green
+
+  # Example 3: use numeric level for unsafe/custom enchants
+  # enchant-overrides:
+  #   efficiency:
+  #     levels:
+  #       "100":
+  #         level-segments:
+  #           - text: " [{level_arabic}]"
+  #             color: "#00FFFF"
+
+  # Placeholders available in segments:
+  # {name}         -> literal enchant name
+  # {level_roman}  -> roman level (works with high levels too)
+  # {level_arabic} -> numeric level (unsafe/custom friendly)
+
+
+
+  # NOTE:
+  # If a segment starts with a space (example: " {level_roman}" or " [{level_arabic}]")
+  # it is intentional for visual spacing after the enchant name.
+  # This is aesthetic behavior, not a bug.
+
+  # Hope you enjoy it and have fun!
+  # Written by joshiny

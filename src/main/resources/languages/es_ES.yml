@@ -1,0 +1,62 @@
+# Descripciones de encantamientos vanilla 1.21.4 — Español
+# Las claves coinciden con la clave de espacio de nombres de Minecraft (sin "minecraft:")
+
+# --- Armadura ---
+protection: Reduce todo el daño recibido
+fire_protection: Reduce el daño por fuego y lava, y acorta la duración en llamas
+feather_falling: Reduce el daño por caída
+blast_protection: Reduce el daño y el retroceso por explosiones
+projectile_protection: Reduce el daño de flechas y proyectiles
+respiration: Extiende el tiempo de respiración bajo el agua
+aqua_affinity: Aumenta la velocidad de minería bajo el agua
+thorns: Daña a los atacantes cuando recibes un golpe
+depth_strider: Aumenta la velocidad de movimiento bajo el agua
+frost_walker: Convierte el agua bajo tus pies en hielo helado
+binding_curse: No puede retirarse de las ranuras de armadura
+soul_speed: Aumenta la velocidad de movimiento en arena y tierra de almas
+swift_sneak: Aumenta la velocidad de movimiento mientras te agachas
+
+# --- Espada ---
+sharpness: Aumenta el daño cuerpo a cuerpo contra todos los mobs
+smite: Aumenta el daño cuerpo a cuerpo contra mobs no-muertos
+bane_of_arthropods: Aumenta el daño y aplica Lentitud a los artrópodos
+knockback: Aumenta el retroceso causado al golpear
+fire_aspect: Prende fuego a los enemigos al golpearlos
+looting: Aumenta el botín de los mobs y la cantidad máxima de drops
+sweeping_edge: Aumenta el daño causado por los ataques de barrido
+
+# --- Herramientas ---
+efficiency: Aumenta la velocidad de minería
+silk_touch: Los bloques minados caen intactos en lugar de sus recursos
+unbreaking: Aumenta la durabilidad del objeto
+fortune: Aumenta la cantidad de objetos que caen de los bloques
+
+# --- Arco ---
+power: Aumenta el daño de las flechas
+punch: Aumenta el retroceso de las flechas disparadas
+flame: Las flechas prenden fuego a los enemigos
+infinity: Disparar no consume flechas (se requiere al menos una flecha)
+
+# --- Caña de pescar ---
+luck_of_the_sea: Aumenta la probabilidad de pescar objetos valiosos
+lure: Reduce el tiempo de espera hasta que un pez pique
+
+# --- Tridente ---
+loyalty: El tridente regresa hacia ti tras ser lanzado
+impaling: Aumenta el daño contra criaturas acuáticas
+riptide: Te propulsa hacia adelante al lanzarlo bajo la lluvia o en el agua
+channeling: Invoca un rayo cuando el tridente golpea a un mob durante una tormenta
+
+# --- Ballesta ---
+multishot: Dispara tres flechas por el coste de una
+quick_charge: Reduce el tiempo necesario para cargar la ballesta
+piercing: Las flechas atraviesan múltiples entidades
+
+# --- General ---
+mending: Repara el objeto usando orbes de experiencia recogidos
+vanishing_curse: El objeto desaparece al morir en lugar de caer al suelo
+
+# --- Maza (1.21+) ---
+density: Aumenta el daño de caída de la maza por cada bloque caído
+breach: Reduce la efectividad de la armadura del objetivo
+wind_burst: Te lanza hacia arriba al matar a un mob con la maza

@@ -1,0 +1,62 @@
+# Vanilla 1.21.4 enchantment descriptions — English
+# Keys match the Minecraft namespaced key (without "minecraft:")
+
+# --- Armor ---
+protection: Reduces all incoming damage
+fire_protection: Reduces fire and lava damage, and shortens burn duration
+feather_falling: Reduces fall damage taken
+blast_protection: Reduces explosion damage and knockback
+projectile_protection: Reduces damage from arrows and projectiles
+respiration: Extends underwater breathing time
+aqua_affinity: Increases mining speed underwater
+thorns: Damages attackers when you are hit
+depth_strider: Increases movement speed underwater
+frost_walker: Turns water beneath your feet into frosted ice
+binding_curse: Cannot be removed from armor slots
+soul_speed: Increases movement speed on soul sand and soul soil
+swift_sneak: Increases movement speed while sneaking
+
+# --- Sword ---
+sharpness: Increases melee damage against all mobs
+smite: Increases melee damage against undead mobs
+bane_of_arthropods: Increases damage and applies Slowness to arthropods
+knockback: Increases knockback dealt on hit
+fire_aspect: Sets enemies on fire when hit
+looting: Increases mob loot and maximum drop amount
+sweeping_edge: Increases damage dealt by sweep attacks
+
+# --- Tools ---
+efficiency: Increases mining speed
+silk_touch: Mined blocks drop themselves instead of their resources
+unbreaking: Increases item durability
+fortune: Increases the amount of items dropped from blocks
+
+# --- Bow ---
+power: Increases arrow damage
+punch: Increases the knockback of fired arrows
+flame: Arrows set enemies on fire
+infinity: Shooting does not consume arrows (requires at least one arrow)
+
+# --- Fishing Rod ---
+luck_of_the_sea: Increases the chance of catching valuable items while fishing
+lure: Decreases the time until a fish bites
+
+# --- Trident ---
+loyalty: Trident returns to you after being thrown
+impaling: Increases damage against aquatic mobs
+riptide: Propels you forward when thrown in rain or water
+channeling: Calls a lightning bolt when the trident hits a mob during a thunderstorm
+
+# --- Crossbow ---
+multishot: Shoots three arrows at the cost of one
+quick_charge: Decreases the time needed to charge the crossbow
+piercing: Arrows pass through multiple entities
+
+# --- General ---
+mending: Repairs the item using experience orbs collected
+vanishing_curse: Item disappears on death instead of being dropped
+
+# --- Mace (1.21+) ---
+density: Increases fall damage dealt by the mace per block fallen
+breach: Reduces the effectiveness of the target's armor
+wind_burst: Launches you upward when you kill a mob with the mace
