@@ -135,12 +135,15 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         val enchantments = collectEnchantments(item, meta)
         val wasProcessed = pdc.has(processedKey, PersistentDataType.BYTE)
         val appliedVersion = pdc.get(formatVersionKey, PersistentDataType.INTEGER)
+        val storedBaseLoreSize = if (wasProcessed) {
+            pdc.get(legacyOriginalLoreSizeKey, PersistentDataType.INTEGER)
+                ?: pdc.get(baseLoreSizeKey, PersistentDataType.INTEGER)
+                ?: currentLore.size
+        } else {
+            currentLore.size
+        }
         val baseLore = if (wasProcessed) {
-            val baseLoreSize =
-                pdc.get(legacyOriginalLoreSizeKey, PersistentDataType.INTEGER)
-                    ?: pdc.get(baseLoreSizeKey, PersistentDataType.INTEGER)
-                    ?: currentLore.size
-            currentLore.take(minOf(baseLoreSize, currentLore.size)).toMutableList()
+            currentLore.take(minOf(storedBaseLoreSize, currentLore.size)).toMutableList()
         } else {
             currentLore.toMutableList()
         }
@@ -186,15 +189,6 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         val appliedSignature = pdc.get(enchantSignatureKey, PersistentDataType.STRING)
         val appliedStyleFingerprint = pdc.get(styleFingerprintKey, PersistentDataType.STRING)
 
-        if (wasProcessed &&
-            appliedLocale == activeLocale &&
-            appliedSignature == signature &&
-            appliedVersion == FORMAT_VERSION &&
-            appliedStyleFingerprint == styleFingerprint
-        ) {
-            return false
-        }
-
         val injectedLines = mutableListOf<Component>()
         for ((enchantment, level) in enchantments) {
             injectedLines.add(buildEnchantLine(enchantment, level))
@@ -205,9 +199,31 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
 
         if (injectedLines.isEmpty()) return false
 
-        val hadSpacer = normalizedBaseLore.isNotEmpty()
+        val loreSections = if (wasProcessed) {
+            extractLoreSectionsByStoredLayout(
+                currentLore,
+                normalizedBaseLore,
+                storedBaseLoreSize,
+                injectedLines.size
+            )
+        } else {
+            LoreSections(normalizedBaseLore, mutableListOf())
+        }
+
+        val expectedLore = buildFinalLore(loreSections.baseLore, injectedLines, loreSections.trailingLore)
+
+        if (wasProcessed &&
+            appliedLocale == activeLocale &&
+            appliedSignature == signature &&
+            appliedVersion == FORMAT_VERSION &&
+            appliedStyleFingerprint == styleFingerprint &&
+            currentLore == expectedLore
+        ) {
+            return false
+        }
+
         pdc.set(processedKey, PersistentDataType.BYTE, 1)
-        pdc.set(baseLoreSizeKey, PersistentDataType.INTEGER, normalizedBaseLore.size)
+        pdc.set(baseLoreSizeKey, PersistentDataType.INTEGER, loreSections.baseLore.size)
         pdc.remove(legacyOriginalLoreSizeKey)
         pdc.set(
             originalHideEnchantsKey,
@@ -226,12 +242,7 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
 
         meta.addItemFlags(ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_STORED_ENCHANTS)
 
-        val newLore = normalizedBaseLore.toMutableList()
-        if (hadSpacer) {
-            newLore.add(Component.empty())
-        }
-        newLore.addAll(injectedLines)
-        meta.lore(newLore)
+        meta.lore(expectedLore)
         item.itemMeta = meta
         return true
     }
@@ -257,6 +268,43 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
             .map { (enchantment, level) -> "${enchantment.key.asString()}:$level" }
             .sorted()
             .joinToString(";")
+    }
+
+    private fun buildFinalLore(
+        baseLore: List<Component>,
+        injectedLines: List<Component>,
+        trailingLore: List<Component>
+    ): MutableList<Component> {
+        val finalLore = baseLore.toMutableList()
+        if (baseLore.isNotEmpty()) {
+            finalLore.add(Component.empty())
+        }
+        finalLore.addAll(injectedLines)
+        finalLore.addAll(trailingLore)
+        return finalLore
+    }
+
+    private fun extractLoreSectionsByStoredLayout(
+        currentLore: List<Component>,
+        fallbackBaseLore: MutableList<Component>,
+        storedBaseLoreSize: Int,
+        injectedLineCount: Int
+    ): LoreSections {
+        if (currentLore.isEmpty()) return LoreSections(fallbackBaseLore, mutableListOf())
+
+        val baseBoundary = minOf(storedBaseLoreSize.coerceAtLeast(0), currentLore.size)
+        val baseLore = currentLore.take(baseBoundary).toMutableList()
+
+        var cursor = baseBoundary
+        if (baseLore.isNotEmpty() && cursor < currentLore.size && currentLore[cursor] == Component.empty()) {
+            cursor++
+        }
+
+        val clampedInjectedCount = injectedLineCount.coerceAtLeast(0)
+        cursor = (cursor + clampedInjectedCount).coerceAtMost(currentLore.size)
+
+        val trailingLore = currentLore.drop(cursor).toMutableList()
+        return LoreSections(baseLore, trailingLore)
     }
 
     private fun sanitizeLegacyInjectedLore(
@@ -319,11 +367,13 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
 
         if (styleActive && override != null && (override.nameSegments.isNotEmpty() || override.levelSegments.isNotEmpty())) {
             var line = Component.empty()
+            val effectiveNameColor = override.nameColor ?: nameColor
+            val effectiveLevelColor = override.levelColor ?: levelColor
 
             val nameSegments = if (override.nameSegments.isNotEmpty()) {
                 override.nameSegments
             } else {
-                listOf(TextSegment("{name}", override.nameColor))
+                listOf(TextSegment("{name}", effectiveNameColor))
             }
 
             for (segment in nameSegments) {
@@ -352,7 +402,6 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
                         )
                     }
                 } else {
-                    val effectiveLevelColor = override.levelColor
                     line = line.append(
                         Component.text(" ")
                             .color(effectiveLevelColor)
@@ -527,8 +576,8 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         return listOf(
             "use-translatable=${override.useTranslatableName}",
             "literal=${override.literalName ?: ""}",
-            "name-color=${override.nameColor.asHexString().lowercase(Locale.ROOT)}",
-            "level-color=${override.levelColor.asHexString().lowercase(Locale.ROOT)}",
+            "name-color=${override.nameColor?.asHexString()?.lowercase(Locale.ROOT) ?: "inherit"}",
+            "level-color=${override.levelColor?.asHexString()?.lowercase(Locale.ROOT) ?: "inherit"}",
             "name-segments=$nameSegments",
             "level-segments=$levelSegments"
         ).joinToString(",")
@@ -571,6 +620,11 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
     private data class TextSegment(
         val text: String,
         val color: TextColor
+    )
+
+    private data class LoreSections(
+        val baseLore: MutableList<Component>,
+        val trailingLore: MutableList<Component>
     )
 
     private data class EnchantNameStyle(
@@ -678,13 +732,23 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
 
                 val nameSegments = parseSegments(section.getMapList("name-segments"))
                 val levelSegments = parseSegments(section.getMapList("level-segments"))
+                val nameColor = if (section.contains("name-color")) {
+                    parseColor(section.getString("name-color"), NamedTextColor.GRAY)
+                } else {
+                    null
+                }
+                val levelColor = if (section.contains("level-color")) {
+                    parseColor(section.getString("level-color"), NamedTextColor.GRAY)
+                } else {
+                    null
+                }
                 return EnchantOverride(
                     useTranslatableName = section.getBoolean("use-translatable-name", true),
                     literalName = section.getString("literal-name"),
                     nameSegments = nameSegments,
                     levelSegments = levelSegments,
-                    nameColor = parseColor(section.getString("name-color"), NamedTextColor.GRAY),
-                    levelColor = parseColor(section.getString("level-color"), NamedTextColor.GRAY)
+                    nameColor = nameColor,
+                    levelColor = levelColor
                 )
             }
 
@@ -721,8 +785,8 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         val literalName: String?,
         val nameSegments: List<TextSegment>,
         val levelSegments: List<TextSegment>,
-        val nameColor: TextColor,
-        val levelColor: TextColor
+        val nameColor: TextColor?,
+        val levelColor: TextColor?
     )
 
     private data class ManualEnchantRule(
