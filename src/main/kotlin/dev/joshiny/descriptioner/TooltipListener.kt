@@ -4,9 +4,11 @@ import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.format.TextColor
 import net.kyori.adventure.text.format.TextDecoration
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.NamespacedKey
 import org.bukkit.enchantments.Enchantment
 import org.bukkit.entity.Player
+import org.bukkit.event.enchantment.EnchantItemEvent
 import org.bukkit.event.entity.PlayerDeathEvent
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
@@ -16,6 +18,7 @@ import org.bukkit.event.inventory.InventoryCloseEvent
 import org.bukkit.event.inventory.InventoryClickEvent
 import org.bukkit.event.inventory.InventoryDragEvent
 import org.bukkit.event.inventory.PrepareAnvilEvent
+import org.bukkit.event.inventory.PrepareGrindstoneEvent
 import org.bukkit.event.player.*
 import org.bukkit.inventory.ItemFlag
 import org.bukkit.inventory.Inventory
@@ -31,21 +34,16 @@ import java.util.Locale
 class TooltipListener(private val plugin: Descriptioner) : Listener {
 
     companion object {
-        private const val FORMAT_VERSION = 5
+        private const val PLUGIN_LINE_MARKER = "descriptioner:managed-line"
+        private const val LEGACY_TEXT_MARKER = "\u2063\u2063\u2060\u200B\u200C\u200D\u2060\u2064\u2064\u200B\u2060\u200D\u200C\u200B\u2063"
     }
 
-    private val processedKey = NamespacedKey(plugin, "has_descriptions")
-    private val baseLoreSizeKey = NamespacedKey(plugin, "base_lore_size")
-    private val legacyOriginalLoreSizeKey = NamespacedKey(plugin, "original_lore_size")
     private val originalHideEnchantsKey = NamespacedKey(plugin, "original_hide_enchants")
     private val originalHideStoredEnchantsKey = NamespacedKey(plugin, "original_hide_stored_enchants")
-    private val appliedLocaleKey = NamespacedKey(plugin, "applied_locale")
-    private val enchantSignatureKey = NamespacedKey(plugin, "enchant_signature")
-    private val formatVersionKey = NamespacedKey(plugin, "format_version")
-    private val styleFingerprintKey = NamespacedKey(plugin, "style_fingerprint")
     private val refreshTasks = mutableMapOf<UUID, BukkitTask>()
+    private var normalizeTask: BukkitTask? = null
     private val enchantNameStyle = EnchantNameStyle.fromConfig(plugin)
-    private val styleFingerprint = buildStyleFingerprint()
+    private val plainTextSerializer = PlainTextComponentSerializer.plainText()
 
     // Inject on join so player inventory items are immediately prepared.
     @EventHandler(priority = EventPriority.MONITOR)
@@ -83,6 +81,27 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         if (injectDescriptions(updated)) {
             event.result = updated
         }
+    }
+
+    // Inject/cleanup directly in grindstone preview output so enchant removal is reflected immediately.
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onPrepareGrindstone(event: PrepareGrindstoneEvent) {
+        val result = event.result ?: return
+        if (result.type.isAir) return
+
+        val updated = result.clone()
+        if (injectDescriptions(updated)) {
+            event.result = updated
+        }
+    }
+
+    // Re-apply tooltip lines immediately after enchanting table applies enchants.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onEnchantItem(event: EnchantItemEvent) {
+        plugin.server.scheduler.runTask(plugin, Runnable {
+            injectDescriptions(event.item)
+            injectForOpenView(event.enchanter)
+        })
     }
 
     // Stop open-view sync when inventory closes.
@@ -126,6 +145,23 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         injectDescriptions(event.offHandItem)
     }
 
+    // Force quick re-sync after command-based enchant/lore changes.
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onCommandPostProcess(event: PlayerCommandPreprocessEvent) {
+        if (event.isCancelled) return
+
+        val message = event.message.trim().lowercase(Locale.ROOT)
+        val isEnchantCommand = message.startsWith("/enchant ") ||
+            message.startsWith("/minecraft:enchant ") ||
+            message.startsWith("/essentials:enchant ")
+        val isLoreCommand = message.startsWith("/lore ") ||
+            message.startsWith("/essentials:lore ")
+
+        if (!isEnchantCommand && !isLoreCommand) return
+
+        schedulePostCommandRefresh(event.player)
+    }
+
     private fun injectDescriptions(item: ItemStack): Boolean {
         if (item.type.isAir) return false
         val meta = item.itemMeta ?: return false
@@ -133,118 +169,80 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         val currentLore = meta.lore() ?: emptyList()
 
         val enchantments = collectEnchantments(item, meta)
-        val wasProcessed = pdc.has(processedKey, PersistentDataType.BYTE)
-        val appliedVersion = pdc.get(formatVersionKey, PersistentDataType.INTEGER)
-        val storedBaseLoreSize = if (wasProcessed) {
-            pdc.get(legacyOriginalLoreSizeKey, PersistentDataType.INTEGER)
-                ?: pdc.get(baseLoreSizeKey, PersistentDataType.INTEGER)
-                ?: currentLore.size
-        } else {
-            currentLore.size
-        }
-        val baseLore = if (wasProcessed) {
-            currentLore.take(minOf(storedBaseLoreSize, currentLore.size)).toMutableList()
-        } else {
-            currentLore.toMutableList()
-        }
-        val normalizedBaseLore = if (!wasProcessed || appliedVersion == null || appliedVersion < FORMAT_VERSION) {
-            sanitizeLegacyInjectedLore(baseLore, enchantments)
-        } else {
-            baseLore
-        }
-
-        val originalHideEnchants = if (wasProcessed) {
-            pdc.get(originalHideEnchantsKey, PersistentDataType.BYTE)?.toInt() == 1
-        } else {
-            meta.hasItemFlag(ItemFlag.HIDE_ENCHANTS)
-        }
-        val originalHideStoredEnchants = if (wasProcessed) {
-            pdc.get(originalHideStoredEnchantsKey, PersistentDataType.BYTE)?.toInt() == 1
-        } else {
-            meta.hasItemFlag(ItemFlag.HIDE_STORED_ENCHANTS)
-        }
+        val hadPluginLines = currentLore.any { isPluginLine(it) }
+        val originalHideEnchantsSnapshot = pdc.get(originalHideEnchantsKey, PersistentDataType.BYTE)
+        val originalHideStoredEnchantsSnapshot = pdc.get(originalHideStoredEnchantsKey, PersistentDataType.BYTE)
+        val hasStoredFlagSnapshot =
+            originalHideEnchantsSnapshot != null ||
+                originalHideStoredEnchantsSnapshot != null
+        val retainedLore = buildRetainedLore(currentLore)
 
         if (enchantments.isEmpty()) {
-            if (!wasProcessed) return false
+            if (!hadPluginLines && !hasStoredFlagSnapshot) return false
 
-            clearProcessingKeys(pdc)
-            if (originalHideEnchants) {
-                meta.addItemFlags(ItemFlag.HIDE_ENCHANTS)
-            } else {
-                meta.removeItemFlags(ItemFlag.HIDE_ENCHANTS)
+            clearFlagKeys(pdc)
+            if (originalHideEnchantsSnapshot != null) {
+                if (originalHideEnchantsSnapshot.toInt() == 1) {
+                    meta.addItemFlags(ItemFlag.HIDE_ENCHANTS)
+                } else {
+                    meta.removeItemFlags(ItemFlag.HIDE_ENCHANTS)
+                }
             }
-            if (originalHideStoredEnchants) {
-                meta.addItemFlags(ItemFlag.HIDE_STORED_ENCHANTS)
-            } else {
-                meta.removeItemFlags(ItemFlag.HIDE_STORED_ENCHANTS)
+            if (originalHideStoredEnchantsSnapshot != null) {
+                if (originalHideStoredEnchantsSnapshot.toInt() == 1) {
+                    meta.addItemFlags(ItemFlag.HIDE_STORED_ENCHANTS)
+                } else {
+                    meta.removeItemFlags(ItemFlag.HIDE_STORED_ENCHANTS)
+                }
             }
-            meta.lore(normalizedBaseLore.ifEmpty { null })
+            meta.lore(retainedLore.ifEmpty { null })
             item.itemMeta = meta
             return true
         }
 
-        val activeLocale = plugin.descriptionManager.getActiveLocale()
-        val signature = buildEnchantSignature(enchantments)
-        val appliedLocale = pdc.get(appliedLocaleKey, PersistentDataType.STRING)
-        val appliedSignature = pdc.get(enchantSignatureKey, PersistentDataType.STRING)
-        val appliedStyleFingerprint = pdc.get(styleFingerprintKey, PersistentDataType.STRING)
+        if (!pdc.has(originalHideEnchantsKey, PersistentDataType.BYTE)) {
+            pdc.set(
+                originalHideEnchantsKey,
+                PersistentDataType.BYTE,
+                if (meta.hasItemFlag(ItemFlag.HIDE_ENCHANTS)) 1 else 0
+            )
+        }
+        if (!pdc.has(originalHideStoredEnchantsKey, PersistentDataType.BYTE)) {
+            pdc.set(
+                originalHideStoredEnchantsKey,
+                PersistentDataType.BYTE,
+                if (meta.hasItemFlag(ItemFlag.HIDE_STORED_ENCHANTS)) 1 else 0
+            )
+        }
 
         val injectedLines = mutableListOf<Component>()
         for ((enchantment, level) in enchantments) {
-            injectedLines.add(buildEnchantLine(enchantment, level))
+            injectedLines.add(markPluginLine(buildEnchantLine(enchantment, level)))
             plugin.descriptionManager.getDescriptionLine(enchantment.key.key)?.let { descLine ->
-                injectedLines.add(descLine)
+                injectedLines.add(markPluginLine(descLine))
             }
         }
 
         if (injectedLines.isEmpty()) return false
 
-        val loreSections = if (wasProcessed) {
-            extractLoreSectionsByStoredLayout(
-                currentLore,
-                normalizedBaseLore,
-                storedBaseLoreSize,
-                injectedLines.size
-            )
-        } else {
-            LoreSections(normalizedBaseLore, mutableListOf())
-        }
+        val expectedLore = buildFinalLore(retainedLore, injectedLines)
+        val hasHiddenFlags =
+            meta.hasItemFlag(ItemFlag.HIDE_ENCHANTS) &&
+                meta.hasItemFlag(ItemFlag.HIDE_STORED_ENCHANTS)
 
-        val expectedLore = buildFinalLore(loreSections.baseLore, injectedLines, loreSections.trailingLore)
-
-        if (wasProcessed &&
-            appliedLocale == activeLocale &&
-            appliedSignature == signature &&
-            appliedVersion == FORMAT_VERSION &&
-            appliedStyleFingerprint == styleFingerprint &&
-            currentLore == expectedLore
-        ) {
+        if (currentLore == expectedLore && hasHiddenFlags) {
             return false
         }
-
-        pdc.set(processedKey, PersistentDataType.BYTE, 1)
-        pdc.set(baseLoreSizeKey, PersistentDataType.INTEGER, loreSections.baseLore.size)
-        pdc.remove(legacyOriginalLoreSizeKey)
-        pdc.set(
-            originalHideEnchantsKey,
-            PersistentDataType.BYTE,
-            if (originalHideEnchants) 1 else 0
-        )
-        pdc.set(
-            originalHideStoredEnchantsKey,
-            PersistentDataType.BYTE,
-            if (originalHideStoredEnchants) 1 else 0
-        )
-        pdc.set(appliedLocaleKey, PersistentDataType.STRING, activeLocale)
-        pdc.set(enchantSignatureKey, PersistentDataType.STRING, signature)
-        pdc.set(formatVersionKey, PersistentDataType.INTEGER, FORMAT_VERSION)
-        pdc.set(styleFingerprintKey, PersistentDataType.STRING, styleFingerprint)
 
         meta.addItemFlags(ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_STORED_ENCHANTS)
 
         meta.lore(expectedLore)
         item.itemMeta = meta
         return true
+    }
+
+    private fun buildRetainedLore(currentLore: List<Component>): MutableList<Component> {
+        return currentLore.filterNot { isPluginLine(it) }.toMutableList()
     }
 
     private fun collectEnchantments(item: ItemStack, meta: org.bukkit.inventory.meta.ItemMeta): List<Pair<Enchantment, Int>> {
@@ -260,80 +258,65 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
             }
         }
 
-        return enchantments.values.toList()
+        return enchantments.values
+            .sortedBy { (enchantment, _) -> enchantment.key.asString() }
     }
 
-    private fun buildEnchantSignature(enchantments: List<Pair<Enchantment, Int>>): String {
-        return enchantments
-            .map { (enchantment, level) -> "${enchantment.key.asString()}:$level" }
-            .sorted()
-            .joinToString(";")
-    }
-
-    private fun buildFinalLore(
-        baseLore: List<Component>,
-        injectedLines: List<Component>,
-        trailingLore: List<Component>
-    ): MutableList<Component> {
-        val finalLore = baseLore.toMutableList()
-        if (baseLore.isNotEmpty()) {
-            finalLore.add(Component.empty())
+    private fun buildFinalLore(retainedLore: List<Component>, injectedLines: List<Component>): MutableList<Component> {
+        val finalLore = injectedLines.toMutableList()
+        if (retainedLore.isNotEmpty()) {
+            finalLore.add(buildPluginSpacerLine())
+            finalLore.addAll(retainedLore)
         }
-        finalLore.addAll(injectedLines)
-        finalLore.addAll(trailingLore)
         return finalLore
     }
 
-    private fun extractLoreSectionsByStoredLayout(
-        currentLore: List<Component>,
-        fallbackBaseLore: MutableList<Component>,
-        storedBaseLoreSize: Int,
-        injectedLineCount: Int
-    ): LoreSections {
-        if (currentLore.isEmpty()) return LoreSections(fallbackBaseLore, mutableListOf())
-
-        val baseBoundary = minOf(storedBaseLoreSize.coerceAtLeast(0), currentLore.size)
-        val baseLore = currentLore.take(baseBoundary).toMutableList()
-
-        var cursor = baseBoundary
-        if (baseLore.isNotEmpty() && cursor < currentLore.size && currentLore[cursor] == Component.empty()) {
-            cursor++
-        }
-
-        val clampedInjectedCount = injectedLineCount.coerceAtLeast(0)
-        cursor = (cursor + clampedInjectedCount).coerceAtMost(currentLore.size)
-
-        val trailingLore = currentLore.drop(cursor).toMutableList()
-        return LoreSections(baseLore, trailingLore)
+    private fun buildPluginSpacerLine(): Component {
+        return markPluginLine(Component.empty())
     }
 
-    private fun sanitizeLegacyInjectedLore(
-        baseLore: MutableList<Component>,
-        enchantments: List<Pair<Enchantment, Int>>
-    ): MutableList<Component> {
-        if (baseLore.isEmpty()) return baseLore
+    private fun markPluginLine(line: Component): Component {
+        return line.insertion(PLUGIN_LINE_MARKER)
+    }
 
-        val enchantLines = enchantments.map { (enchantment, level) -> buildEnchantLine(enchantment, level) }.toSet()
-        val descriptionLines = enchantments.mapNotNull { (enchantment, _) ->
-            plugin.descriptionManager.getDescriptionLine(enchantment.key.key)
-        }.toSet()
+    private fun isPluginLine(line: Component): Boolean {
+        if (hasPluginInsertionMarker(line)) {
+            return true
+        }
 
-        var removed = 0
-        while (baseLore.isNotEmpty()) {
-            val last = baseLore.last()
-            if (last in enchantLines || last in descriptionLines) {
-                baseLore.removeAt(baseLore.lastIndex)
-                removed++
-                continue
+        // Clean up lines generated by older builds that appended the marker as text.
+        val plain = plainTextSerializer.serialize(line)
+        return plain.contains(LEGACY_TEXT_MARKER)
+    }
+
+    private fun hasPluginInsertionMarker(component: Component): Boolean {
+        if (component.style().insertion() == PLUGIN_LINE_MARKER) {
+            return true
+        }
+
+        for (child in component.children()) {
+            if (hasPluginInsertionMarker(child)) {
+                return true
             }
-            break
         }
 
-        if (removed > 0 && baseLore.isNotEmpty() && baseLore.last() == Component.empty()) {
-            baseLore.removeAt(baseLore.lastIndex)
-        }
+        return false
+    }
 
-        return baseLore
+    private fun schedulePostCommandRefresh(player: Player) {
+        val delays = longArrayOf(1L, 2L, 4L)
+        for ((index, delay) in delays.withIndex()) {
+            plugin.server.scheduler.runTaskLater(plugin, Runnable {
+                if (!player.isOnline) return@Runnable
+
+                forEachPlayerInventoryItem(player) { injectDescriptions(it) }
+                injectForOpenView(player)
+
+                if (index == delays.lastIndex) {
+                    player.updateInventory()
+                }
+            }, delay)
+        }
     }
 
     private fun buildEnchantLine(enchantment: Enchantment, level: Int): Component {
@@ -496,14 +479,174 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
     }
 
     private fun processInventory(inventory: Inventory) {
+        normalizeInventory(inventory)
+    }
+
+    fun isNormalizeRunning(): Boolean {
+        return normalizeTask != null
+    }
+
+    fun normalizeLoadedItemsBatched(
+        batchSize: Int = 200,
+        onComplete: (NormalizeSummary) -> Unit
+    ): Boolean {
+        if (normalizeTask != null) return false
+
+        val targets = collectNormalizeTargets()
+        var scanned = 0
+        var updated = 0
+        var slotIndex = 0
+        var dropIndex = 0
+
+        val normalizedBatchSize = batchSize.coerceIn(1, 5000)
+
+        val task = plugin.server.scheduler.runTaskTimer(plugin, Runnable {
+            try {
+                var budget = normalizedBatchSize
+
+                while (budget > 0 && slotIndex < targets.inventorySlots.size) {
+                    val target = targets.inventorySlots[slotIndex++]
+                    budget--
+
+                    val item = target.inventory.getItem(target.slot) ?: continue
+                    if (item.type.isAir) continue
+
+                    scanned++
+                    if (injectDescriptions(item)) {
+                        target.inventory.setItem(target.slot, item)
+                        updated++
+                    }
+                }
+
+                while (budget > 0 && dropIndex < targets.worldDrops.size) {
+                    val dropped = targets.worldDrops[dropIndex++]
+                    budget--
+
+                    if (!dropped.isValid) continue
+                    val item = dropped.itemStack
+                    if (item.type.isAir) continue
+
+                    scanned++
+                    if (injectDescriptions(item)) {
+                        dropped.itemStack = item
+                        updated++
+                    }
+                }
+
+                if (slotIndex >= targets.inventorySlots.size && dropIndex >= targets.worldDrops.size) {
+                    normalizeTask?.cancel()
+                    normalizeTask = null
+
+                    for (player in targets.players) {
+                        if (player.isOnline) {
+                            player.updateInventory()
+                        }
+                    }
+
+                    onComplete(
+                        NormalizeSummary(
+                            scanned = scanned,
+                            updated = updated,
+                            players = targets.players.size,
+                            worldDrops = targets.worldDrops.size,
+                            containerSlots = targets.containerSlots
+                        )
+                    )
+                }
+            } catch (ex: Exception) {
+                normalizeTask?.cancel()
+                normalizeTask = null
+                plugin.logger.warning("Descriptioner normalize failed: ${ex.message}")
+                onComplete(
+                    NormalizeSummary(
+                        scanned = scanned,
+                        updated = updated,
+                        players = targets.players.size,
+                        worldDrops = targets.worldDrops.size,
+                        containerSlots = targets.containerSlots
+                    )
+                )
+            }
+        }, 1L, 1L)
+
+        normalizeTask = task
+        return true
+    }
+
+    private fun collectNormalizeTargets(): NormalizeTargets {
+        val players = plugin.server.onlinePlayers.toList()
+        val inventories = LinkedHashSet<Inventory>()
+        val containerInventories = LinkedHashSet<Inventory>()
+
+        for (player in players) {
+            inventories.add(player.inventory)
+
+            val view = player.openInventory
+            inventories.add(view.topInventory)
+            inventories.add(view.bottomInventory)
+        }
+
+        for (world in plugin.server.worlds) {
+            for (chunk in world.loadedChunks) {
+                for (state in chunk.tileEntities) {
+                    val holder = state as? org.bukkit.inventory.InventoryHolder ?: continue
+                    if (inventories.add(holder.inventory)) {
+                        containerInventories.add(holder.inventory)
+                    }
+                }
+            }
+        }
+
+        val inventorySlots = mutableListOf<InventorySlotTarget>()
+        var containerSlots = 0
+
+        for (inventory in inventories) {
+            val isContainerInventory = inventory in containerInventories
+            val contents = inventory.contents
+            for (slot in contents.indices) {
+                val item = contents[slot] ?: continue
+                if (item.type.isAir) continue
+
+                inventorySlots.add(InventorySlotTarget(inventory, slot))
+                if (isContainerInventory) {
+                    containerSlots++
+                }
+            }
+        }
+
+        val worldDrops = mutableListOf<org.bukkit.entity.Item>()
+        for (world in plugin.server.worlds) {
+            for (entity in world.entities) {
+                val dropped = entity as? org.bukkit.entity.Item ?: continue
+                worldDrops.add(dropped)
+            }
+        }
+
+        return NormalizeTargets(
+            players = players,
+            inventorySlots = inventorySlots,
+            worldDrops = worldDrops,
+            containerSlots = containerSlots
+        )
+    }
+
+    private fun normalizeInventory(inventory: Inventory): Pair<Int, Int> {
         val contents = inventory.contents
+        var scanned = 0
+        var updated = 0
+
         for (slot in contents.indices) {
             val item = contents[slot] ?: continue
             if (item.type.isAir) continue
+
+            scanned++
             if (injectDescriptions(item)) {
                 inventory.setItem(slot, item)
+                updated++
             }
         }
+
+        return scanned to updated
     }
 
     private fun startAutoRefresh(player: Player) {
@@ -527,60 +670,9 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         refreshTasks.remove(playerId)?.cancel()
     }
 
-    private fun clearProcessingKeys(pdc: org.bukkit.persistence.PersistentDataContainer) {
-        pdc.remove(processedKey)
-        pdc.remove(baseLoreSizeKey)
-        pdc.remove(legacyOriginalLoreSizeKey)
+    private fun clearFlagKeys(pdc: org.bukkit.persistence.PersistentDataContainer) {
         pdc.remove(originalHideEnchantsKey)
         pdc.remove(originalHideStoredEnchantsKey)
-        pdc.remove(appliedLocaleKey)
-        pdc.remove(enchantSignatureKey)
-        pdc.remove(formatVersionKey)
-        pdc.remove(styleFingerprintKey)
-    }
-
-    private fun buildStyleFingerprint(): String {
-        val parts = mutableListOf<String>()
-        parts += "enabled=${enchantNameStyle.enabled}"
-        parts += "always-show-level=${enchantNameStyle.alwaysShowLevel}"
-        parts += "normal-name=${enchantNameStyle.normalNameColor.asHexString().lowercase(Locale.ROOT)}"
-        parts += "normal-level=${enchantNameStyle.normalLevelColor.asHexString().lowercase(Locale.ROOT)}"
-        parts += "curse-name=${enchantNameStyle.curseNameColor.asHexString().lowercase(Locale.ROOT)}"
-        parts += "curse-level=${enchantNameStyle.curseLevelColor.asHexString().lowercase(Locale.ROOT)}"
-        parts += "roman-enabled=${enchantNameStyle.romanCharColorsEnabled}"
-
-        for ((char, color) in enchantNameStyle.romanCharColors.toSortedMap()) {
-            parts += "roman-$char=${color.asHexString().lowercase(Locale.ROOT)}"
-        }
-
-        for ((enchantKey, rule) in enchantNameStyle.enchantRules.toSortedMap()) {
-            parts += "rule-$enchantKey-default=${serializeOverride(rule.defaultOverride)}"
-            for ((level, levelOverride) in rule.levelOverrides.toSortedMap()) {
-                parts += "rule-$enchantKey-level-$level=${serializeOverride(levelOverride)}"
-            }
-        }
-
-        return parts.joinToString("|")
-    }
-
-    private fun serializeOverride(override: EnchantOverride?): String {
-        if (override == null) return "null"
-
-        val nameSegments = override.nameSegments.joinToString("~") {
-            "${it.text}@${it.color.asHexString().lowercase(Locale.ROOT)}"
-        }
-        val levelSegments = override.levelSegments.joinToString("~") {
-            "${it.text}@${it.color.asHexString().lowercase(Locale.ROOT)}"
-        }
-
-        return listOf(
-            "use-translatable=${override.useTranslatableName}",
-            "literal=${override.literalName ?: ""}",
-            "name-color=${override.nameColor?.asHexString()?.lowercase(Locale.ROOT) ?: "inherit"}",
-            "level-color=${override.levelColor?.asHexString()?.lowercase(Locale.ROOT) ?: "inherit"}",
-            "name-segments=$nameSegments",
-            "level-segments=$levelSegments"
-        ).joinToString(",")
     }
 
     private fun applyTemplate(template: String, name: String, levelRoman: String, levelArabic: String): String {
@@ -622,9 +714,24 @@ class TooltipListener(private val plugin: Descriptioner) : Listener {
         val color: TextColor
     )
 
-    private data class LoreSections(
-        val baseLore: MutableList<Component>,
-        val trailingLore: MutableList<Component>
+    data class NormalizeSummary(
+        val scanned: Int,
+        val updated: Int,
+        val players: Int,
+        val worldDrops: Int,
+        val containerSlots: Int
+    )
+
+    private data class InventorySlotTarget(
+        val inventory: Inventory,
+        val slot: Int
+    )
+
+    private data class NormalizeTargets(
+        val players: List<Player>,
+        val inventorySlots: List<InventorySlotTarget>,
+        val worldDrops: List<org.bukkit.entity.Item>,
+        val containerSlots: Int
     )
 
     private data class EnchantNameStyle(

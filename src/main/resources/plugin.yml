@@ -1,7 +1,16 @@
 name: Descriptioner
-version: 1.0.1
+version: 1.0.2
 main: dev.joshiny.descriptioner.Descriptioner
 api-version: "1.21"
 description: Muestra descripciones de encantamientos en los tooltips de los items
 authors:
   - joshiny
+commands:
+  descriptioner:
+    description: Descriptioner admin command
+    usage: /descriptioner normalize [batchSize]
+    permission: descriptioner.admin
+permissions:
+  descriptioner.admin:
+    description: Allows use of Descriptioner admin commands
+    default: op

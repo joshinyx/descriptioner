@@ -22,6 +22,8 @@ Descriptioner keeps vanilla enchant visuals while adding short lore lines under 
 - Built-in `en_US` and `es_ES`
 - Auto fallback locale support
 - Handles regular enchanted items and enchanted books
+- Marker-based tooltip management for deterministic, idempotent rebuilds
+- Includes `/descriptioner normalize [batchSize]` admin command for bulk normalization
 - Safe behavior when a description is missing (silently skipped)
 - Optional per-enchant/per-level styling rules
 
@@ -48,7 +50,7 @@ Descriptioner keeps vanilla enchant visuals while adding short lore lines under 
 
 Generated artifact:
 
-- `build/libs/Descriptioner-1.0.1.jar`
+- `build/libs/Descriptioner-1.0.2.jar`
 
 ## Configuration
 
