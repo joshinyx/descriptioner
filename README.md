@@ -7,7 +7,7 @@
  ╚═════╝ ╚══════╝╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝╚═╝        ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝
 ```
 
-# Descriptioner
+![image alt](https://cdn.modrinth.com/data/VDGTdtY1/images/44be465b2e63892db21efa6c94a39b356f3a3218.png)
 
 A lightweight Paper plugin for Minecraft 1.21.4 that injects readable enchantment descriptions directly into item tooltips.
 
