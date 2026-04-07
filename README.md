@@ -9,13 +9,13 @@
 
 # Descriptioner
 
-A lightweight Paper plugin for Minecraft 1.21.4 that injects readable enchantment descriptions directly into item tooltips.
+A lightweight Paper plugin for Minecraft 1.21.x (verified on 1.21.11) that injects readable enchantment descriptions directly into item tooltips.
 
 Descriptioner keeps vanilla enchant visuals while adding short lore lines under each enchantment, with configurable language files and optional advanced styling.
 
 ## Highlights
 
-- Supports Paper/Purpur 1.21.4
+- Supports Paper/Purpur 1.21.x (verified on 1.21.11 & 1.21.4)
 - Kotlin-based, modern and fast implementation
 - Uses Adventure components (no legacy ChatColor formatting)
 - Language files are editable YAML files
@@ -31,8 +31,8 @@ Descriptioner keeps vanilla enchant visuals while adding short lore lines under 
 
 - Java: 21+
 - Server software:
-  - Paper 1.21.4
-  - Purpur 1.21.4 (supported)
+  - Paper 1.21.x (verified on 1.21.11 & 1.21.4)
+  - Purpur 1.21.x (verified on 1.21.11 & 1.21.4)
 
 ## Installation
 
@@ -98,7 +98,7 @@ For each enchanted item tooltip:
 
 ### Descriptions are not showing
 
-- Verify server is Paper/Purpur 1.21.4.
+- Verify server is Paper/Purpur 1.21.x.
 - Verify Java 21 is being used.
 - Check if your selected locale file exists.
 - Check server logs for config YAML errors.
